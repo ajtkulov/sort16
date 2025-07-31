@@ -40,13 +40,14 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   }
 
   def write(): Unit = {
-    val fos = new FileOutputStream(outputFile())
+    val outputStream = new BufferedOutputStream(new FileOutputStream(outputFile()), 10485760)
+
     for {
       idx <- 0 until itemsCount
     } {
-      fos.write(buffer, newAr(idx) * 16, 16)
+      outputStream.write(buffer, newAr(idx) * 16, 16)
     }
-    fos.close()
+    outputStream.close()
   }
 
   def customFinalize(): Unit = {
@@ -71,7 +72,7 @@ object RecordWrap {
   }
 }
 
-class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: Int = 10000000, val index: Int) {
+class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: Int = 20000000, val index: Int) {
   val size = FileUtils.fileSize(fileName)
   val file = new RandomAccessFile(fileName, "r")
   file.seek(offset)
@@ -90,7 +91,7 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
 }
 
 class MergeSort(sortedFiles: Vector[String], outputFileName: String) {
-  val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 65536)
+  val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 10485760)
   val heap = scala.collection.mutable.PriorityQueue[RecordWrap]()(RecordWrap.ordering)
   val fileMap = new Array[FileIterator](sortedFiles.size)
 
@@ -185,7 +186,7 @@ object Main extends App {
     val files: List[String] = conf.files.get.get
     val output = conf.output.get.get
 
-    println(s"params, blockSize=${blockSize}, threads=${maxConcurrency}, output=$output")
+    println(s"params, files=${files.mkString(",")}, blockSize=${blockSize}, threads=${maxConcurrency}, output=$output")
 
     val chunks: Vector[String] = sortFile(files, s"$output.tmp", blockSize, maxConcurrency)
 
