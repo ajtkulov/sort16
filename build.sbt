@@ -22,7 +22,10 @@ parallelExecution in Test := false
 libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-library" % scalaVersion.value,
   "org.scala-lang" % "scala-reflect" % scalaVersion.value,
-  "org.scalatest" %% "scalatest" % "3.2.9" % Test
+  "org.scalatest" %% "scalatest" % "3.2.9" % Test,
+  "dev.zio" %% "zio" % "2.0.18",
+  "dev.zio" %% "zio-test" % "2.0.18" % Test,
+  "dev.zio" %% "zio-test-sbt" % "2.0.18" % Test
 )
 
 libraryDependencies += "org.rogach" %% "scallop" % "5.1.0"

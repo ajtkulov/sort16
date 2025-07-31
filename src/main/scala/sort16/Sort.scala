@@ -22,7 +22,6 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   }
 
   def internalSort(): Unit = {
-    println(1)
     newAr = Array.range(0, itemsCount).sortWith { case (l, r) =>
       var idx = 0
       val ll = l * 16
@@ -139,18 +138,31 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
 }
 
 object Main extends App {
-  def sortFile(inputFile: String, blockSize: Int): Int = {
+  def sortFile(inputFile: String, blockSize: Int, maxConcurrency: Int = 12): Int = {
     val size: Long = FileUtils.fileSize(inputFile)
 
     val batches = (0 to ((size - 1) / blockSize).toInt).map { idx =>
       Batch(new RandomAccessFile(inputFile, "r"), blockSize * idx, inputFile, idx.toInt, blockSize)
     }
 
-    batches.foreach { b =>
-      b.read()
-      b.internalSort()
-      b.write()
-      b.customFinalize()
+    import zio._
+
+    val processBatch = (b: Batch) => for {
+      _ <- ZIO.attempt(b.read())
+      _ <- ZIO.attempt(b.internalSort())
+      _ <- ZIO.attempt(b.write())
+      _ <- ZIO.attempt(b.customFinalize())
+    } yield ()
+
+    val semaphore = zio.Semaphore.make(maxConcurrency)
+    val parallelProcessing = semaphore.flatMap { sem =>
+      ZIO.foreachPar(batches) { batch =>
+        sem.withPermit(processBatch(batch))
+      }
+    }
+
+    zio.Unsafe.unsafe { implicit unsafe =>
+      zio.Runtime.default.unsafe.run(parallelProcessing).getOrThrow()
     }
 
     batches.size
@@ -164,10 +176,11 @@ object Main extends App {
     val conf = new Conf(args)
 
     val blockSize: Int = conf.blocksize.getOrElse(1000000000).toInt
+    val maxConcurrency: Int = conf.threads.getOrElse(12).toInt
     val input = conf.input.get.get
     val output = conf.output.get.get
 
-    val chunks: Int = sortFile(input, blockSize)
+    val chunks: Int = sortFile(input, blockSize, maxConcurrency)
 
     val m = new MergeSort(input, chunks, output)
     m.init()
