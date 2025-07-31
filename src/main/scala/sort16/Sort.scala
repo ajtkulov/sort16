@@ -8,13 +8,18 @@ import org.rogach.scallop._
 
 case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, idx: Int, blockSize: Int) {
   var len = blockSize
-  @volatile private var buffer = new Array[Byte](blockSize)
+  @volatile private var buffer: Array[Byte] = null
   @volatile private var newAr: Array[Int] = null
 
   private var bytesRead: Int = 0
   private var itemsCount: Int = 0
 
+  def outputFile(): String = {
+    s"$outputFileName.$idx"
+  }
+
   def read(): Unit = {
+    buffer = new Array[Byte](blockSize)
     file.seek(offset)
     bytesRead = file.read(buffer)
     assert(bytesRead % 16 == 0, bytesRead)
@@ -35,7 +40,7 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   }
 
   def write(): Unit = {
-    val fos = new FileOutputStream(s"$outputFileName.$idx")
+    val fos = new FileOutputStream(outputFile())
     for {
       idx <- 0 until itemsCount
     } {
@@ -84,15 +89,14 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
   }
 }
 
-class MergeSort(inputFileName: String, chunks: Int, outputFileName: String) {
+class MergeSort(sortedFiles: Vector[String], outputFileName: String) {
   val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 65536)
   val heap = scala.collection.mutable.PriorityQueue[RecordWrap]()(RecordWrap.ordering)
-  val files = (0 until chunks).map(x => s"$inputFileName.$x").toVector
-  val fileMap = new Array[FileIterator](chunks)
+  val fileMap = new Array[FileIterator](sortedFiles.size)
 
   def init(): Unit = {
     print("merge sort")
-    files.zipWithIndex.foreach { case (f, idx) =>
+    sortedFiles.zipWithIndex.foreach { case (f, idx) =>
       fileMap(idx) = new FileIterator(f, 0, index = idx)
       val chunks = fileMap(idx).nextChunk()
       chunks.foreach { str =>
@@ -130,7 +134,7 @@ class MergeSort(inputFileName: String, chunks: Int, outputFileName: String) {
 }
 
 class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
-  val input = opt[String](required = true)
+  val files = trailArg[List[String]]()
   val output = opt[String](required = true)
   val blocksize = opt[Int]()
   val threads = opt[Int]()
@@ -138,12 +142,13 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
 }
 
 object Main extends App {
-  def sortFile(inputFile: String, blockSize: Int, maxConcurrency: Int = 12): Int = {
-    val size: Long = FileUtils.fileSize(inputFile)
-
-    val batches = (0 to ((size - 1) / blockSize).toInt).map { idx =>
-      Batch(new RandomAccessFile(inputFile, "r"), blockSize * idx, inputFile, idx.toInt, blockSize)
-    }
+  def sortFile(files: List[String], outputFileName: String, blockSize: Int, maxConcurrency: Int = 12): Vector[String] = {
+    val batches = (for {fileName <- files
+                        size: Long = FileUtils.fileSize(fileName)
+                        idx <- 0 to ((size - 1) / blockSize).toInt
+                        } yield {
+      Batch(new RandomAccessFile(fileName, "r"), blockSize * idx, fileName, 0, blockSize)
+    }).toVector.zipWithIndex.map { case (b, idx) => b.copy(idx = idx) }
 
     import zio._
 
@@ -165,7 +170,7 @@ object Main extends App {
       zio.Runtime.default.unsafe.run(parallelProcessing).getOrThrow()
     }
 
-    batches.size
+    batches.map(_.outputFile())
   }
 
   def cleanUp(filesToDelete: Vector[String]) = {
@@ -177,14 +182,16 @@ object Main extends App {
 
     val blockSize: Int = conf.blocksize.getOrElse(1000000000).toInt
     val maxConcurrency: Int = conf.threads.getOrElse(12).toInt
-    val input = conf.input.get.get
+    val files: List[String] = conf.files.get.get
     val output = conf.output.get.get
 
-    val chunks: Int = sortFile(input, blockSize, maxConcurrency)
+    println(s"params, blockSize=${blockSize}, threads=${maxConcurrency}, output=$output")
 
-    val m = new MergeSort(input, chunks, output)
+    val chunks: Vector[String] = sortFile(files, s"$output.tmp", blockSize, maxConcurrency)
+
+    val m = new MergeSort(chunks, output)
     m.init()
     m.sort()
-    cleanUp(m.files)
+    cleanUp(chunks)
   }
 }
