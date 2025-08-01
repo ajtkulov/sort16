@@ -1,9 +1,12 @@
 package sort16
 
 import sort.FileUtils
+
 import java.io._
 import java.io.FileOutputStream
 import org.rogach.scallop._
+
+import java.lang.System.gc
 
 
 case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, idx: Int, blockSize: Int) {
@@ -72,7 +75,7 @@ object RecordWrap {
   }
 }
 
-class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: Int = 20000000, val index: Int) {
+class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: Int, val index: Int) {
   val size = FileUtils.fileSize(fileName)
   val file = new RandomAccessFile(fileName, "r")
   file.seek(offset)
@@ -90,7 +93,7 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
   }
 }
 
-class MergeSort(sortedFiles: Vector[String], outputFileName: String) {
+class MergeSort(sortedFiles: Vector[String], outputFileName: String, readBufferSize: Int = 20000000) {
   val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 10485760)
   val heap = scala.collection.mutable.PriorityQueue[RecordWrap]()(RecordWrap.ordering)
   val fileMap = new Array[FileIterator](sortedFiles.size)
@@ -98,7 +101,7 @@ class MergeSort(sortedFiles: Vector[String], outputFileName: String) {
   def init(): Unit = {
     print("merge sort")
     sortedFiles.zipWithIndex.foreach { case (f, idx) =>
-      fileMap(idx) = new FileIterator(f, 0, index = idx)
+      fileMap(idx) = new FileIterator(f, 0, readBufferSize, index = idx)
       val chunks = fileMap(idx).nextChunk()
       chunks.foreach { str =>
         heap.enqueue(str)
@@ -139,6 +142,7 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val output = opt[String](required = true)
   val blocksize = opt[Int]()
   val threads = opt[Int]()
+  val action = opt[String]()
   verify()
 }
 
@@ -158,6 +162,7 @@ object Main extends App {
       _ <- ZIO.attempt(b.internalSort())
       _ <- ZIO.attempt(b.write())
       _ <- ZIO.attempt(b.customFinalize())
+      _ <- ZIO.attempt(gc())
     } yield ()
 
     val semaphore = zio.Semaphore.make(maxConcurrency)
@@ -185,14 +190,21 @@ object Main extends App {
     val maxConcurrency: Int = conf.threads.getOrElse(12).toInt
     val files: List[String] = conf.files.get.get
     val output = conf.output.get.get
+    val action = conf.action.getOrElse("sort")
 
     println(s"params, files=${files.mkString(",")}, blockSize=${blockSize}, threads=${maxConcurrency}, output=$output")
 
-    val chunks: Vector[String] = sortFile(files, s"$output.tmp", blockSize, maxConcurrency)
+    if (action == "sort") {
+      val chunks: Vector[String] = sortFile(files, s"$output.tmp", blockSize, maxConcurrency)
 
-    val m = new MergeSort(chunks, output)
-    m.init()
-    m.sort()
-    cleanUp(chunks)
+      val m = new MergeSort(chunks, output)
+      m.init()
+      m.sort()
+      cleanUp(chunks)
+    } else {
+      val m = new MergeSort(files.toVector, output)
+      m.init()
+      m.sort()
+    }
   }
 }

@@ -29,3 +29,6 @@ project/plugins/src_managed/
 metals*.*
 *.json
 *.md
+*.jar
+*.
+!*/
