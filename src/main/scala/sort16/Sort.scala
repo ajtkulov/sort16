@@ -57,6 +57,14 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
     file.close()
     buffer = null
   }
+
+  def pipeline(): Unit = {
+    read()
+    internalSort()
+    write()
+    customFinalize()
+    gc()
+  }
 }
 
 case class RecordWrap(ar: Array[Byte], offset: Int, isLastInBlock: Boolean, index: Int)
@@ -159,11 +167,7 @@ object Main extends App {
     import zio._
 
     val processBatch = (b: Batch) => for {
-      _ <- ZIO.attempt(b.read())
-      _ <- ZIO.attempt(b.internalSort())
-      _ <- ZIO.attempt(b.write())
-      _ <- ZIO.attempt(b.customFinalize())
-      _ <- ZIO.attempt(gc())
+      _ <- ZIO.attempt(b.pipeline())
     } yield ()
 
     val semaphore = zio.Semaphore.make(maxConcurrency)
