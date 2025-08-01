@@ -143,6 +143,7 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val blocksize = opt[Int]()
   val threads = opt[Int]()
   val action = opt[String]()
+  val readBufferSize = opt[Int]()
   verify()
 }
 
@@ -191,18 +192,19 @@ object Main extends App {
     val files: List[String] = conf.files.get.get
     val output = conf.output.get.get
     val action = conf.action.getOrElse("sort")
+    val readBufferSize = conf.readBufferSize.getOrElse(20000000)
 
     println(s"params, files=${files.mkString(",")}, blockSize=${blockSize}, threads=${maxConcurrency}, output=$output")
 
     if (action == "sort") {
       val chunks: Vector[String] = sortFile(files, s"$output.tmp", blockSize, maxConcurrency)
 
-      val m = new MergeSort(chunks, output)
+      val m = new MergeSort(chunks, output, readBufferSize)
       m.init()
       m.sort()
       cleanUp(chunks)
     } else {
-      val m = new MergeSort(files.toVector, output)
+      val m = new MergeSort(files.toVector, output, readBufferSize)
       m.init()
       m.sort()
     }
