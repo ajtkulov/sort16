@@ -72,7 +72,7 @@ case class RecordWrap(ar: Array[Byte], offset: Int, isLastInBlock: Boolean, inde
 object RecordWrap {
   val ordering = new Ordering[RecordWrap] {
     override def compare(x: RecordWrap, y: RecordWrap): Int = {
-      var idx = 0
+      var idx: Int = 0
 
       while (idx < 15 && x.ar(x.offset + idx) == y.ar(y.offset + idx)) {
         idx = idx + 1
@@ -89,6 +89,7 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
   file.seek(offset)
   var buffer: Array[Byte] = new Array[Byte](bufferSize)
   val bytesRead = file.read(buffer)
+  assert(bytesRead % 16 == 0)
   val isReadTillEnd: Boolean = offset.toLong + bytesRead.toLong == size
 
   def nextChunk(): Iterator[RecordWrap] = {
