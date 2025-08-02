@@ -89,7 +89,7 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
   file.seek(offset)
   var buffer: Array[Byte] = new Array[Byte](bufferSize)
   val bytesRead = file.read(buffer)
-  assert(bytesRead % 16 == 0)
+  assert(bytesRead % 16 == 0, bytesRead)
   val isReadTillEnd: Boolean = offset.toLong + bytesRead.toLong == size
 
   def nextChunk(): Iterator[RecordWrap] = {
