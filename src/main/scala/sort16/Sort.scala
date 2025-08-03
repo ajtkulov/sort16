@@ -216,9 +216,3 @@ object Main extends App {
     }
   }
 }
-
-object Q extends App {
-  val m = new MergeSort(Vector("0.bytes.0"), "0", 3000000)
-  m.init()
-  m.sort()
-}
