@@ -78,7 +78,7 @@ object RecordWrap {
         idx = idx + 1
       }
 
-      x.ar(x.offset + idx) compareTo y.ar(y.offset + idx)
+      -(x.ar(x.offset + idx) compareTo y.ar(y.offset + idx))
     }
   }
 }
@@ -89,6 +89,7 @@ class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: In
   file.seek(offset)
   var buffer: Array[Byte] = new Array[Byte](bufferSize)
   val bytesRead = file.read(buffer)
+  file.close()
   assert(bytesRead % 16 == 0, bytesRead)
   val isReadTillEnd: Boolean = offset.toLong + bytesRead.toLong == size
 
@@ -214,4 +215,10 @@ object Main extends App {
       m.sort()
     }
   }
+}
+
+object Q extends App {
+  val m = new MergeSort(Vector("0.bytes.0"), "0", 3000000)
+  m.init()
+  m.sort()
 }
