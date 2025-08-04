@@ -56,6 +56,7 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   def customFinalize(): Unit = {
     file.close()
     buffer = null
+    newAr = null
   }
 
   def pipeline(): Unit = {
