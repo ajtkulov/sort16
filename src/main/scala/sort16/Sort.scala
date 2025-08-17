@@ -7,7 +7,7 @@ import java.io.FileOutputStream
 import org.rogach.scallop._
 
 import java.lang.System.gc
-
+import java.nio.{ByteBuffer, ByteOrder}
 
 case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, idx: Int, blockSize: Int) {
   var len = blockSize
@@ -31,14 +31,20 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
 
   def internalSort(): Unit = {
     newAr = Array.range(0, itemsCount).sortWith { case (l, r) =>
+
+      val lbuffer = ByteBuffer.wrap(buffer, l * 16, 16).order(ByteOrder.BIG_ENDIAN)
+      val rbuffer = ByteBuffer.wrap(buffer, r * 16, 16).order(ByteOrder.BIG_ENDIAN)
+
+      val lints = Array.fill(4)(lbuffer.getInt())
+      val rints = Array.fill(4)(rbuffer.getInt())
+
+
       var idx = 0
-      val ll = l * 16
-      val rr = r * 16
-      while (idx < 15 && buffer(ll + idx) == buffer(rr + idx)) {
+      while (idx < 3 && lints(idx) == rints(idx)) {
         idx = idx + 1
       }
 
-      (buffer(ll + idx) compareTo buffer(rr + idx)) < 0
+      (lints(idx) compareTo rints(idx)) < 0
     }
   }
 
@@ -73,13 +79,18 @@ case class RecordWrap(ar: Array[Byte], offset: Int, isLastInBlock: Boolean, inde
 object RecordWrap {
   val ordering = new Ordering[RecordWrap] {
     override def compare(x: RecordWrap, y: RecordWrap): Int = {
-      var idx: Int = 0
+      val lbuffer = ByteBuffer.wrap(x.ar, x.offset, 16).order(ByteOrder.BIG_ENDIAN)
+      val rbuffer = ByteBuffer.wrap(y.ar, y.offset, 16).order(ByteOrder.BIG_ENDIAN)
 
-      while (idx < 15 && x.ar(x.offset + idx) == y.ar(y.offset + idx)) {
+      val lints = Array.fill(4)(lbuffer.getInt())
+      val rints = Array.fill(4)(rbuffer.getInt())
+
+      var idx = 0
+      while (idx < 3 && lints(idx) == rints(idx)) {
         idx = idx + 1
       }
 
-      -(x.ar(x.offset + idx) compareTo y.ar(y.offset + idx))
+      -(lints(idx) compareTo rints(idx))
     }
   }
 }
