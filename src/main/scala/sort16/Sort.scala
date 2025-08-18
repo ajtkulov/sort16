@@ -175,7 +175,7 @@ object Main extends App {
                         size: Long = FileUtils.fileSize(fileName)
                         idx <- 0 to ((size - 1) / blockSize).toInt
                         } yield {
-      Batch(new RandomAccessFile(fileName, "r"), blockSize * idx, fileName, 0, blockSize)
+      Batch(new RandomAccessFile(fileName, "r"), blockSize.toLong * idx, fileName, 0, blockSize)
     }).toVector.zipWithIndex.map { case (b, idx) => b.copy(idx = idx) }
 
     import zio._
