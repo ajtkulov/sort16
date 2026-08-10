@@ -10,11 +10,11 @@ parallelExecution in Test := false
 
 fork := true
 
-lazy val commonSettings = Seq(
-  organization := "ajtkulov.github.com",
-  scalaVersion := "2.13.6",
-  sources in(Compile, doc) := Seq.empty,
-)
+organization := "ajtkulov.github.com"
+
+scalaVersion := "2.13.6"
+
+Compile / doc / sources := Seq.empty
 
 parallelExecution in Test := false
 
@@ -30,7 +30,4 @@ libraryDependencies ++= Seq(
 
 libraryDependencies += "org.rogach" %% "scallop" % "5.1.0"
 
-lazy val app = (project in file("."))
-  .settings(
-    assembly / assemblyJarName := "sort16.jar"
-  )
+assembly / assemblyJarName := "sort16.jar"

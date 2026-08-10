@@ -9,6 +9,24 @@ import org.rogach.scallop._
 import java.lang.System.gc
 import java.nio.{ByteBuffer, ByteOrder}
 
+object RecordCompare {
+  /** Natural order: negative if left < right, using four signed big-endian ints. */
+  def compare(left: Array[Byte], leftOffset: Int, right: Array[Byte], rightOffset: Int): Int = {
+    val lbuffer = ByteBuffer.wrap(left, leftOffset, 16).order(ByteOrder.BIG_ENDIAN)
+    val rbuffer = ByteBuffer.wrap(right, rightOffset, 16).order(ByteOrder.BIG_ENDIAN)
+
+    val lints = Array.fill(4)(lbuffer.getInt())
+    val rints = Array.fill(4)(rbuffer.getInt())
+
+    var idx = 0
+    while (idx < 3 && lints(idx) == rints(idx)) {
+      idx = idx + 1
+    }
+
+    lints(idx) compareTo rints(idx)
+  }
+}
+
 case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, idx: Int, blockSize: Int) {
   var len = blockSize
   @volatile private var buffer: Array[Byte] = null
@@ -31,20 +49,7 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
 
   def internalSort(): Unit = {
     newAr = Array.range(0, itemsCount).sortWith { case (l, r) =>
-
-      val lbuffer = ByteBuffer.wrap(buffer, l * 16, 16).order(ByteOrder.BIG_ENDIAN)
-      val rbuffer = ByteBuffer.wrap(buffer, r * 16, 16).order(ByteOrder.BIG_ENDIAN)
-
-      val lints = Array.fill(4)(lbuffer.getInt())
-      val rints = Array.fill(4)(rbuffer.getInt())
-
-
-      var idx = 0
-      while (idx < 3 && lints(idx) == rints(idx)) {
-        idx = idx + 1
-      }
-
-      (lints(idx) compareTo rints(idx)) < 0
+      RecordCompare.compare(buffer, l * 16, buffer, r * 16) < 0
     }
   }
 
@@ -79,18 +84,8 @@ case class RecordWrap(ar: Array[Byte], offset: Int, isLastInBlock: Boolean, inde
 object RecordWrap {
   val ordering = new Ordering[RecordWrap] {
     override def compare(x: RecordWrap, y: RecordWrap): Int = {
-      val lbuffer = ByteBuffer.wrap(x.ar, x.offset, 16).order(ByteOrder.BIG_ENDIAN)
-      val rbuffer = ByteBuffer.wrap(y.ar, y.offset, 16).order(ByteOrder.BIG_ENDIAN)
-
-      val lints = Array.fill(4)(lbuffer.getInt())
-      val rints = Array.fill(4)(rbuffer.getInt())
-
-      var idx = 0
-      while (idx < 3 && lints(idx) == rints(idx)) {
-        idx = idx + 1
-      }
-
-      -(lints(idx) compareTo rints(idx))
+      // PriorityQueue is a max-heap; negate so the smallest record dequeues first.
+      -RecordCompare.compare(x.ar, x.offset, y.ar, y.offset)
     }
   }
 }
@@ -159,17 +154,23 @@ class MergeSort(sortedFiles: Vector[String], outputFileName: String, readBufferS
   }
 }
 
-class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
+class Conf(arguments: Seq[String], throwOnError: Boolean = false) extends ScallopConf(arguments) {
   val files = trailArg[List[String]]()
   val output = opt[String](required = true)
   val blocksize = opt[Int]()
   val threads = opt[Int]()
   val readbuffersize = opt[Int]()
   val action = opt[String]()
+
+  override def onError(e: Throwable): Unit = {
+    if (throwOnError) throw e
+    else super.onError(e)
+  }
+
   verify()
 }
 
-object Main extends App {
+object Main {
   def sortFile(files: List[String], outputFileName: String, blockSize: Int, maxConcurrency: Int = 12): Vector[String] = {
     val batches = (for {fileName <- files
                         size: Long = FileUtils.fileSize(fileName)
@@ -202,7 +203,7 @@ object Main extends App {
     filesToDelete.foreach(file => FileUtils.delete(file))
   }
 
-  override def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     val conf = new Conf(args)
 
     val blockSize: Int = conf.blocksize.getOrElse(1000000000).toInt
