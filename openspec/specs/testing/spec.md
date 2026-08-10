@@ -74,3 +74,25 @@ The project SHALL include a file-based test that exercises failure when a read l
 #### Scenario: Truncated file rejected
 - **WHEN** an input file whose length is not a multiple of 16 is processed by a code path that asserts alignment
 - **THEN** the test SHALL assert that processing fails (assertion or equivalent hard failure)
+
+### Requirement: Rust In-Memory Record Order Tests
+The Rust project SHALL provide automated in-memory tests that verify the record-format total order (differ at each int index, equality, signed high-bit keys) using the production compare path.
+
+#### Scenario: Differ at each integer position
+- **WHEN** pairs of 16-byte records differ only at integer index 0, 1, 2, or 3
+- **THEN** Rust tests SHALL assert that the smaller signed integer at that index orders first
+
+#### Scenario: Equal and signed keys
+- **WHEN** records are equal, or contain high-bit signed patterns such as `0xFFFFFFFF`
+- **THEN** Rust tests SHALL assert equality and signed ordering respectively
+
+### Requirement: Rust File-Based Sort And Merge Tests
+The Rust project SHALL provide automated file-based tests covering single-block and multi-block external sort, multi-file inputs, source unchanged, temp-run cleanup, merge-only, tiny read-buffer refill, and invalid length failure—mirroring the Scala `testing` scenarios.
+
+#### Scenario: Multi-block and merge refill
+- **WHEN** Rust tests use tiny `blocksize` and `readbuffersize` on temporary files
+- **THEN** they SHALL assert globally ordered output, preserved record counts, and successful refill behavior
+
+#### Scenario: Invalid length rejected
+- **WHEN** a file whose length is not a multiple of 16 is processed
+- **THEN** Rust tests SHALL assert hard failure (error / panic path consistent with production checks)

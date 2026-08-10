@@ -31,3 +31,7 @@ metals*.*
 *.jar
 *.
 !*/
+# Rust
+**/target/
+**/*.rs.bk
+*.pdb

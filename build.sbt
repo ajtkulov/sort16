@@ -31,3 +31,4 @@ libraryDependencies ++= Seq(
 libraryDependencies += "org.rogach" %% "scallop" % "5.1.0"
 
 assembly / assemblyJarName := "sort16.jar"
+assembly / mainClass := Some("sort16.Main")

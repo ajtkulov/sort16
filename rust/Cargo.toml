@@ -1,0 +1,20 @@
+[package]
+name = "sort16"
+version = "0.1.0"
+edition = "2021"
+description = "External sorter for fixed 16-byte binary records (Rust port)"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rayon = "1.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "sort16"
+path = "src/main.rs"
+
+[[example]]
+name = "gen_1g"
+path = "examples/gen_1g.rs"
