@@ -1,0 +1,16 @@
+schema: spec-driven
+
+context: |
+  sort16 is a Scala 2 / sbt / ZIO external sorter for fixed 16-byte binary records.
+  Main entry: src/main/scala/sort16/Sort.scala (Batch → parallel index sort → MergeSort).
+  Record order: four signed big-endian Ints, lexicographic.
+  CLI: trailing input paths + required --output; optional --blocksize, --threads,
+  --readbuffersize, --action (sort vs merge-only).
+  Baseline specs under openspec/specs/ describe current code behavior, not README claims.
+  README currently drifts (mentions --input, globs, per-file merge) — prefer specs + code.
+
+rules:
+  specs:
+    - Baseline specs document observed behavior; do not silently "fix" README drift in specs
+    - Prefer SHALL/MUST requirements with WHEN/THEN scenarios
+    - Keep capability boundaries aligned with record-format, external-sort, k-way-merge, cli
