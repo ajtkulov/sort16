@@ -3,41 +3,46 @@ package sort16
 import sort.FileUtils
 
 import java.io._
-import java.io.FileOutputStream
 import org.rogach.scallop._
 
 import java.lang.System.gc
-import java.nio.{ByteBuffer, ByteOrder}
 
 object RecordCompare {
+  /** Read a signed big-endian 32-bit int without allocating. */
+  def readIntBE(bytes: Array[Byte], offset: Int): Int = {
+    ((bytes(offset) & 0xff) << 24) |
+      ((bytes(offset + 1) & 0xff) << 16) |
+      ((bytes(offset + 2) & 0xff) << 8) |
+      (bytes(offset + 3) & 0xff)
+  }
+
   /** Natural order: negative if left < right, using four signed big-endian ints. */
   def compare(left: Array[Byte], leftOffset: Int, right: Array[Byte], rightOffset: Int): Int = {
-    val lbuffer = ByteBuffer.wrap(left, leftOffset, 16).order(ByteOrder.BIG_ENDIAN)
-    val rbuffer = ByteBuffer.wrap(right, rightOffset, 16).order(ByteOrder.BIG_ENDIAN)
-
-    val lints = Array.fill(4)(lbuffer.getInt())
-    val rints = Array.fill(4)(rbuffer.getInt())
-
-    var idx = 0
-    while (idx < 3 && lints(idx) == rints(idx)) {
-      idx = idx + 1
+    var i = 0
+    while (i < 4) {
+      val l = readIntBE(left, leftOffset + i * 4)
+      val r = readIntBE(right, rightOffset + i * 4)
+      if (l != r) return Integer.compare(l, r)
+      i += 1
     }
-
-    lints(idx) compareTo rints(idx)
+    0
   }
 }
 
-case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, idx: Int, blockSize: Int) {
-  var len = blockSize
-  @volatile private var buffer: Array[Byte] = null
-  @volatile private var newAr: Array[Int] = null
-
+/** Mutable batch pipeline: read → index-sort → contiguous write. */
+class Batch(
+    private val file: RandomAccessFile,
+    private val offset: Long,
+    private val outputFileName: String,
+    val idx: Int,
+    private val blockSize: Int
+) {
+  private var buffer: Array[Byte] = null
+  private var indices: Array[Int] = null
   private var bytesRead: Int = 0
   private var itemsCount: Int = 0
 
-  def outputFile(): String = {
-    s"$outputFileName.$idx"
-  }
+  def outputFile(): String = s"$outputFileName.$idx"
 
   def read(): Unit = {
     buffer = new Array[Byte](blockSize)
@@ -48,26 +53,30 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   }
 
   def internalSort(): Unit = {
-    newAr = Array.range(0, itemsCount).sortWith { case (l, r) =>
+    indices = Array.range(0, itemsCount).sortWith { case (l, r) =>
       RecordCompare.compare(buffer, l * 16, buffer, r * 16) < 0
     }
   }
 
   def write(): Unit = {
-    val outputStream = new BufferedOutputStream(new FileOutputStream(outputFile()), 10485760)
-
-    for {
-      idx <- 0 until itemsCount
-    } {
-      outputStream.write(buffer, newAr(idx) * 16, 16)
+    val sorted = new Array[Byte](itemsCount * 16)
+    var i = 0
+    while (i < itemsCount) {
+      System.arraycopy(buffer, indices(i) * 16, sorted, i * 16, 16)
+      i += 1
     }
-    outputStream.close()
+    val outputStream = new BufferedOutputStream(new FileOutputStream(outputFile()), 10485760)
+    try {
+      outputStream.write(sorted)
+    } finally {
+      outputStream.close()
+    }
   }
 
   def customFinalize(): Unit = {
     file.close()
     buffer = null
-    newAr = null
+    indices = null
   }
 
   def pipeline(): Unit = {
@@ -79,7 +88,8 @@ case class Batch(file: RandomAccessFile, offset: Long, outputFileName: String, i
   }
 }
 
-case class RecordWrap(ar: Array[Byte], offset: Int, isLastInBlock: Boolean, index: Int)
+/** Heap entry pointing into a run's current read buffer. */
+case class RecordWrap(ar: Array[Byte], offset: Int, runIndex: Int)
 
 object RecordWrap {
   val ordering = new Ordering[RecordWrap] {
@@ -90,67 +100,89 @@ object RecordWrap {
   }
 }
 
-class FileIterator(val fileName: String, val offset: Int = 0, val bufferSize: Int, val index: Int) {
-  val size = FileUtils.fileSize(fileName)
-  val file = new RandomAccessFile(fileName, "r")
-  file.seek(offset)
-  var buffer: Array[Byte] = new Array[Byte](bufferSize)
-  val bytesRead = file.read(buffer)
-  file.close()
-  assert(bytesRead % 16 == 0, bytesRead)
-  val isReadTillEnd: Boolean = offset.toLong + bytesRead.toLong == size
+/**
+ * Sequential reader for one sorted run: large buffered reads, cursor over records.
+ * Only the current head is placed on the merge heap.
+ */
+class RunReader(val fileName: String, private var fileOffset: Long, val bufferSize: Int, val index: Int) {
+  val size: Long = FileUtils.fileSize(fileName)
 
-  def nextChunk(): Iterator[RecordWrap] = {
-    val lastIdx = bytesRead / 16
-    val range = 0 until lastIdx
+  private var buffer: Array[Byte] = null
+  private var bytesInBuffer: Int = 0
+  private var recordIndex: Int = 0
+  private var recordCount: Int = 0
 
-    range.iterator.map {
-      idx => RecordWrap(buffer, idx * 16, idx == lastIdx - 1, index)
+  def currentBuffer: Array[Byte] = buffer
+
+  def currentOffset: Int = recordIndex * 16
+
+  def hasCurrent: Boolean = recordIndex < recordCount
+
+  /** Load next chunk from disk. Returns true if at least one record is available. */
+  def load(): Boolean = {
+    if (fileOffset >= size) {
+      buffer = null
+      bytesInBuffer = 0
+      recordIndex = 0
+      recordCount = 0
+      return false
     }
+    val file = new RandomAccessFile(fileName, "r")
+    try {
+      buffer = new Array[Byte](bufferSize)
+      file.seek(fileOffset)
+      bytesInBuffer = file.read(buffer)
+      assert(bytesInBuffer % 16 == 0, bytesInBuffer)
+      recordCount = bytesInBuffer / 16
+      recordIndex = 0
+      fileOffset += bytesInBuffer
+      recordCount > 0
+    } finally {
+      file.close()
+    }
+  }
+
+  def advance(): Unit = {
+    recordIndex += 1
   }
 }
 
 class MergeSort(sortedFiles: Vector[String], outputFileName: String, readBufferSize: Int = 20000000) {
-  val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 10485760)
-  val heap = scala.collection.mutable.PriorityQueue[RecordWrap]()(RecordWrap.ordering)
-  val fileMap = new Array[FileIterator](sortedFiles.size)
+  private val outputStream = new BufferedOutputStream(new FileOutputStream(outputFileName), 10485760)
+  private val heap = scala.collection.mutable.PriorityQueue[RecordWrap]()(RecordWrap.ordering)
+  private val readers = new Array[RunReader](sortedFiles.size)
 
   def init(): Unit = {
-    print("merge sort")
     sortedFiles.zipWithIndex.foreach { case (f, idx) =>
-      fileMap(idx) = new FileIterator(f, 0, readBufferSize, index = idx)
-      val chunks = fileMap(idx).nextChunk()
-      chunks.foreach { str =>
-        heap.enqueue(str)
+      val reader = new RunReader(f, 0L, readBufferSize, idx)
+      readers(idx) = reader
+      if (reader.load()) {
+        enqueueHead(reader)
       }
     }
   }
 
+  private def enqueueHead(reader: RunReader): Unit = {
+    heap.enqueue(RecordWrap(reader.currentBuffer, reader.currentOffset, reader.index))
+  }
+
   def sort(): Unit = {
-    while (heap.nonEmpty) {
-      val head = heap.dequeue()
+    try {
+      while (heap.nonEmpty) {
+        val head = heap.dequeue()
+        outputStream.write(head.ar, head.offset, 16)
 
-      if (head.isLastInBlock) {
-        val idx = head.index
-        if (fileMap(idx) != null) {
-          if (!fileMap(idx).isReadTillEnd) {
-            val curFileIterator = fileMap(idx)
-            fileMap(idx) = new FileIterator(curFileIterator.fileName, curFileIterator.offset + curFileIterator.bytesRead, curFileIterator.bufferSize, idx)
-            val chunks = fileMap(idx).nextChunk()
-
-            chunks.foreach { str =>
-              heap.enqueue(str)
-            }
-          } else {
-            fileMap(idx) = null
-          }
+        val reader = readers(head.runIndex)
+        reader.advance()
+        if (reader.hasCurrent) {
+          enqueueHead(reader)
+        } else if (reader.load()) {
+          enqueueHead(reader)
         }
       }
-
-      outputStream.write(head.ar, head.offset, 16)
+    } finally {
+      outputStream.close()
     }
-
-    outputStream.close()
   }
 }
 
@@ -172,12 +204,14 @@ class Conf(arguments: Seq[String], throwOnError: Boolean = false) extends Scallo
 
 object Main {
   def sortFile(files: List[String], outputFileName: String, blockSize: Int, maxConcurrency: Int = 12): Vector[String] = {
-    val batches = (for {fileName <- files
-                        size: Long = FileUtils.fileSize(fileName)
-                        idx <- 0 to ((size - 1) / blockSize).toInt
-                        } yield {
-      Batch(new RandomAccessFile(fileName, "r"), blockSize.toLong * idx, fileName, 0, blockSize)
-    }).toVector.zipWithIndex.map { case (b, idx) => b.copy(idx = idx) }
+    val batches: Vector[Batch] = (for {
+      fileName <- files
+      size = FileUtils.fileSize(fileName)
+      blockIdx <- 0 to ((size - 1) / blockSize).toInt
+    } yield (fileName, blockSize.toLong * blockIdx)).toVector.zipWithIndex.map {
+      case ((fileName, offset), idx) =>
+        new Batch(new RandomAccessFile(fileName, "r"), offset, fileName, idx, blockSize)
+    }
 
     import zio._
 
@@ -199,15 +233,15 @@ object Main {
     batches.map(_.outputFile())
   }
 
-  def cleanUp(filesToDelete: Vector[String]) = {
+  def cleanUp(filesToDelete: Vector[String]): Unit = {
     filesToDelete.foreach(file => FileUtils.delete(file))
   }
 
   def main(args: Array[String]): Unit = {
     val conf = new Conf(args)
 
-    val blockSize: Int = conf.blocksize.getOrElse(1000000000).toInt
-    val maxConcurrency: Int = conf.threads.getOrElse(12).toInt
+    val blockSize: Int = conf.blocksize.getOrElse(1000000000)
+    val maxConcurrency: Int = conf.threads.getOrElse(12)
     val files: List[String] = conf.files.get.get
     val output = conf.output.get.get
     val action = conf.action.getOrElse("sort")

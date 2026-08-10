@@ -16,15 +16,19 @@ The system SHALL merge one or more sorted run files into a single output file su
 - **THEN** the output file SHALL contain exactly `N` 16-byte records
 
 ### Requirement: Priority-Queue Merge With Chunked Reads
-The merge SHALL keep a priority queue of records drawn from per-run read buffers of configurable `readbuffersize`, refetching the next buffer for a run when that run's last buffered record is emitted.
+The merge SHALL keep a priority queue of at most one head record per run, backed by per-run read buffers of configurable `readbuffersize`. Large sequential reads fill each run's buffer; the heap only holds the current head. When a run's head is emitted, the merge advances within that buffer or refills from disk when the buffer is exhausted.
 
 #### Scenario: Initial load
 - **WHEN** merge initializes
-- **THEN** for each run file the system SHALL read up to `readbuffersize` bytes (rounded down implicitly by record alignment asserts) and enqueue every record from that buffer
+- **THEN** for each non-empty run file the system SHALL read up to `readbuffersize` bytes into a buffer and enqueue only that run's first record
+
+#### Scenario: Advance within buffer
+- **WHEN** a run's head is written and more records remain in that run's current buffer
+- **THEN** the system SHALL enqueue the next record from the same buffer without reading from disk
 
 #### Scenario: Refill after buffer exhausted
 - **WHEN** the last record of a run's current buffer is written to the output and more bytes remain in that run
-- **THEN** the system SHALL open the run at the next offset, read the next buffer, and enqueue its records
+- **THEN** the system SHALL read the next buffer from the next file offset and enqueue that buffer's first record
 
 #### Scenario: Run exhausted
 - **WHEN** the last record of a run's current buffer is written and the run has no remaining bytes

@@ -42,8 +42,8 @@ class RecordFormatSpec extends AnyFunSuite {
   test("RecordWrap.ordering agrees with RecordCompare (max-heap negation)") {
     val a = pack(1, 0, 0, 0)
     val b = pack(2, 0, 0, 0)
-    val wa = RecordWrap(a, 0, isLastInBlock = false, index = 0)
-    val wb = RecordWrap(b, 0, isLastInBlock = false, index = 1)
+    val wa = RecordWrap(a, 0, runIndex = 0)
+    val wb = RecordWrap(b, 0, runIndex = 1)
     assert(RecordWrap.ordering.compare(wa, wb) == -RecordCompare.compare(a, 0, b, 0))
   }
 }

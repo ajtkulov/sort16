@@ -12,7 +12,7 @@ class InvalidRecordLengthSpec extends AnyFunSuite {
       val input = dir.resolve("bad.dat")
       writeRaw(input, Array[Byte](1, 2, 3, 4, 5)) // 5 bytes
 
-      val batch = Batch(
+      val batch = new Batch(
         new RandomAccessFile(input.toFile, "r"),
         offset = 0L,
         outputFileName = input.toString,
@@ -27,13 +27,14 @@ class InvalidRecordLengthSpec extends AnyFunSuite {
     }
   }
 
-  test("FileIterator fails when file length is not a multiple of 16") {
+  test("RunReader.load fails when file length is not a multiple of 16") {
     withTempDir { dir =>
       val input = dir.resolve("bad.dat")
       writeRaw(input, Array[Byte](1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)) // 15 bytes
 
+      val reader = new RunReader(input.toString, fileOffset = 0L, bufferSize = 64, index = 0)
       assertThrows[AssertionError] {
-        new FileIterator(input.toString, offset = 0, bufferSize = 64, index = 0)
+        reader.load()
       }
     }
   }
